@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Sanctions List Monitor - MSWiA Gov.pl
@@ -128,6 +127,10 @@ def parse_xlsx(filepath: Path) -> list[dict]:
         entry["_id"] = "|".join(id_parts).strip("|")
 
         if entry["_id"]:
+            # Skip footnotes/references (rows starting with [number])
+            first_val = next((v for v in entry.values() if v and v.strip()), "")
+            if re.match(r"^\[\d+\]", first_val.strip()):
+                continue
             entries.append(entry)
 
     wb.close()
