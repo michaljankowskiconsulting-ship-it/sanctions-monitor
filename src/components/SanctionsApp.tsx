@@ -46,6 +46,98 @@ function getDisplayColumns(entries: SanctionEntry[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// CSV Download Helpers
+// ---------------------------------------------------------------------------
+
+function escapeCsvCell(value: string): string {
+  if (!value) return "";
+  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+    return '"' + value.replace(/"/g, '""') + '"';
+  }
+  return value;
+}
+
+function downloadCsv(filename: string, csvContent: string) {
+  const BOM = "\uFEFF"; // UTF-8 BOM so Excel opens Polish chars correctly
+  const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadListAsCsv(entries: SanctionEntry[]) {
+  const columns = getDisplayColumns(entries);
+  const header = columns.map(escapeCsvCell).join(",");
+  const rows = entries.map((entry) =>
+    columns.map((col) => escapeCsvCell(entry[col] || "")).join(",")
+  );
+  const csv = [header, ...rows].join("\n");
+  const date = new Date().toISOString().slice(0, 10);
+  downloadCsv(`lista-sankcyjna-${date}.csv`, csv);
+}
+
+function downloadChangelogAsCsv(changelog: ChangelogEntry[]) {
+  const header = "Data,Typ zmiany,Identyfikator,Szczegóły";
+  const rows: string[] = [];
+
+  changelog.forEach((entry) => {
+    const date = formatDate(entry.timestamp);
+
+    entry.added.forEach((item) => {
+      const details = Object.entries(item)
+        .filter(([k, v]) => k !== "_id" && v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("; ");
+      rows.push(
+        [escapeCsvCell(date), "DODANO", escapeCsvCell(item._id), escapeCsvCell(details)].join(",")
+      );
+    });
+
+    entry.removed.forEach((item) => {
+      const details = Object.entries(item)
+        .filter(([k, v]) => k !== "_id" && v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("; ");
+      rows.push(
+        [escapeCsvCell(date), "USUNIĘTO", escapeCsvCell(item._id), escapeCsvCell(details)].join(",")
+      );
+    });
+
+    entry.modified.forEach((item) => {
+      const details = Object.entries(item.changes)
+        .map(([field, change]) => `${field}: "${change.old}" → "${change.new}"`)
+        .join("; ");
+      rows.push(
+        [escapeCsvCell(date), "ZMIENIONO", escapeCsvCell(item._id), escapeCsvCell(details)].join(",")
+      );
+    });
+  });
+
+  const csv = [header, ...rows].join("\n");
+  const date = new Date().toISOString().slice(0, 10);
+  downloadCsv(`historia-zmian-sankcje-${date}.csv`, csv);
+}
+
+// ---------------------------------------------------------------------------
+// Download Button
+// ---------------------------------------------------------------------------
+
+function DownloadButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-sm hover:bg-slate-700 transition border border-slate-700/50 flex items-center gap-2"
+    >
+      <span>⬇</span>
+      {children}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
@@ -124,6 +216,12 @@ function SanctionsList({ entries }: { entries: SanctionEntry[] }) {
 
   return (
     <div>
+      <div className="flex justify-end mb-4">
+        <DownloadButton onClick={() => downloadListAsCsv(entries)}>
+          Pobierz listę (CSV)
+        </DownloadButton>
+      </div>
+
       <div className="overflow-x-auto rounded-lg border border-slate-700/50">
         <table className="w-full text-sm">
           <thead>
@@ -205,145 +303,153 @@ function ChangelogView({ changelog }: { changelog: ChangelogEntry[] }) {
   }
 
   return (
-    <div className="space-y-3">
-      {changelog.map((entry, idx) => {
-        const isExpanded = expanded === idx;
-        const hasChanges =
-          entry.added_count > 0 ||
-          entry.removed_count > 0 ||
-          entry.modified_count > 0;
+    <div>
+      <div className="flex justify-end mb-4">
+        <DownloadButton onClick={() => downloadChangelogAsCsv(changelog)}>
+          Pobierz historię zmian (CSV)
+        </DownloadButton>
+      </div>
 
-        return (
-          <div
-            key={idx}
-            className="border border-slate-700/50 rounded-lg overflow-hidden"
-          >
-            <button
-              onClick={() => setExpanded(isExpanded ? null : idx)}
-              className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-800/30 transition-colors text-left"
+      <div className="space-y-3">
+        {changelog.map((entry, idx) => {
+          const isExpanded = expanded === idx;
+          const hasChanges =
+            entry.added_count > 0 ||
+            entry.removed_count > 0 ||
+            entry.modified_count > 0;
+
+          return (
+            <div
+              key={idx}
+              className="border border-slate-700/50 rounded-lg overflow-hidden"
             >
-              <div className="flex items-center gap-4">
-                <span className="text-slate-400 text-sm tabular-nums">
-                  {formatDate(entry.timestamp)}
+              <button
+                onClick={() => setExpanded(isExpanded ? null : idx)}
+                className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-800/30 transition-colors text-left"
+              >
+                <div className="flex items-center gap-4">
+                  <span className="text-slate-400 text-sm tabular-nums">
+                    {formatDate(entry.timestamp)}
+                  </span>
+                  <div className="flex gap-3">
+                    {entry.added_count > 0 && (
+                      <span className="text-green-400 text-sm font-medium">
+                        +{entry.added_count} dodanych
+                      </span>
+                    )}
+                    {entry.removed_count > 0 && (
+                      <span className="text-red-400 text-sm font-medium">
+                        -{entry.removed_count} usuniętych
+                      </span>
+                    )}
+                    {entry.modified_count > 0 && (
+                      <span className="text-amber-400 text-sm font-medium">
+                        ~{entry.modified_count} zmienionych
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <span className="text-slate-500 text-lg">
+                  {isExpanded ? "▾" : "▸"}
                 </span>
-                <div className="flex gap-3">
-                  {entry.added_count > 0 && (
-                    <span className="text-green-400 text-sm font-medium">
-                      +{entry.added_count} dodanych
-                    </span>
+              </button>
+
+              {isExpanded && hasChanges && (
+                <div className="px-5 pb-5 space-y-4">
+                  {entry.added.length > 0 && (
+                    <div>
+                      <h4 className="text-green-400 font-medium text-sm mb-2 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                        Dodane wpisy
+                      </h4>
+                      <div className="space-y-2">
+                        {entry.added.map((item, j) => (
+                          <div
+                            key={j}
+                            className="bg-green-950/20 border border-green-900/30 rounded-md px-4 py-3 text-sm"
+                          >
+                            <div className="font-medium text-green-300 mb-1">
+                              {item._id}
+                            </div>
+                            {Object.entries(item)
+                              .filter(([k, v]) => k !== "_id" && v)
+                              .map(([k, v]) => (
+                                <div key={k} className="text-slate-400">
+                                  <span className="text-slate-500">{k}:</span> {v}
+                                </div>
+                              ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                  {entry.removed_count > 0 && (
-                    <span className="text-red-400 text-sm font-medium">
-                      -{entry.removed_count} usuniętych
-                    </span>
+
+                  {entry.removed.length > 0 && (
+                    <div>
+                      <h4 className="text-red-400 font-medium text-sm mb-2 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                        Usunięte wpisy
+                      </h4>
+                      <div className="space-y-2">
+                        {entry.removed.map((item, j) => (
+                          <div
+                            key={j}
+                            className="bg-red-950/20 border border-red-900/30 rounded-md px-4 py-3 text-sm"
+                          >
+                            <div className="font-medium text-red-300 mb-1">
+                              {item._id}
+                            </div>
+                            {Object.entries(item)
+                              .filter(([k, v]) => k !== "_id" && v)
+                              .map(([k, v]) => (
+                                <div key={k} className="text-slate-400">
+                                  <span className="text-slate-500">{k}:</span> {v}
+                                </div>
+                              ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                  {entry.modified_count > 0 && (
-                    <span className="text-amber-400 text-sm font-medium">
-                      ~{entry.modified_count} zmienionych
-                    </span>
+
+                  {entry.modified.length > 0 && (
+                    <div>
+                      <h4 className="text-amber-400 font-medium text-sm mb-2 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        Zmodyfikowane wpisy
+                      </h4>
+                      <div className="space-y-2">
+                        {entry.modified.map((item, j) => (
+                          <div
+                            key={j}
+                            className="bg-amber-950/20 border border-amber-900/30 rounded-md px-4 py-3 text-sm"
+                          >
+                            <div className="font-medium text-amber-300 mb-2">
+                              {item._id}
+                            </div>
+                            {Object.entries(item.changes).map(([field, change]) => (
+                              <div key={field} className="text-slate-400 mb-1">
+                                <span className="text-slate-500">{field}:</span>{" "}
+                                <span className="line-through text-red-400/70">
+                                  {change.old || "(puste)"}
+                                </span>{" "}
+                                →{" "}
+                                <span className="text-green-400">
+                                  {change.new || "(puste)"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-              <span className="text-slate-500 text-lg">
-                {isExpanded ? "▾" : "▸"}
-              </span>
-            </button>
-
-            {isExpanded && hasChanges && (
-              <div className="px-5 pb-5 space-y-4">
-                {entry.added.length > 0 && (
-                  <div>
-                    <h4 className="text-green-400 font-medium text-sm mb-2 flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                      Dodane wpisy
-                    </h4>
-                    <div className="space-y-2">
-                      {entry.added.map((item, j) => (
-                        <div
-                          key={j}
-                          className="bg-green-950/20 border border-green-900/30 rounded-md px-4 py-3 text-sm"
-                        >
-                          <div className="font-medium text-green-300 mb-1">
-                            {item._id}
-                          </div>
-                          {Object.entries(item)
-                            .filter(([k, v]) => k !== "_id" && v)
-                            .map(([k, v]) => (
-                              <div key={k} className="text-slate-400">
-                                <span className="text-slate-500">{k}:</span> {v}
-                              </div>
-                            ))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {entry.removed.length > 0 && (
-                  <div>
-                    <h4 className="text-red-400 font-medium text-sm mb-2 flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-                      Usunięte wpisy
-                    </h4>
-                    <div className="space-y-2">
-                      {entry.removed.map((item, j) => (
-                        <div
-                          key={j}
-                          className="bg-red-950/20 border border-red-900/30 rounded-md px-4 py-3 text-sm"
-                        >
-                          <div className="font-medium text-red-300 mb-1">
-                            {item._id}
-                          </div>
-                          {Object.entries(item)
-                            .filter(([k, v]) => k !== "_id" && v)
-                            .map(([k, v]) => (
-                              <div key={k} className="text-slate-400">
-                                <span className="text-slate-500">{k}:</span> {v}
-                              </div>
-                            ))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {entry.modified.length > 0 && (
-                  <div>
-                    <h4 className="text-amber-400 font-medium text-sm mb-2 flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                      Zmodyfikowane wpisy
-                    </h4>
-                    <div className="space-y-2">
-                      {entry.modified.map((item, j) => (
-                        <div
-                          key={j}
-                          className="bg-amber-950/20 border border-amber-900/30 rounded-md px-4 py-3 text-sm"
-                        >
-                          <div className="font-medium text-amber-300 mb-2">
-                            {item._id}
-                          </div>
-                          {Object.entries(item.changes).map(([field, change]) => (
-                            <div key={field} className="text-slate-400 mb-1">
-                              <span className="text-slate-500">{field}:</span>{" "}
-                              <span className="line-through text-red-400/70">
-                                {change.old || "(puste)"}
-                              </span>{" "}
-                              →{" "}
-                              <span className="text-green-400">
-                                {change.new || "(puste)"}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
