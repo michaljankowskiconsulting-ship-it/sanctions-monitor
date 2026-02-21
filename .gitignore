@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# Keep data files tracked (they ARE the database)
+# !data/
+
+# Local env
+.env
+.env.local
