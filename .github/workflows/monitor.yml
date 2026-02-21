@@ -1,1 +1,44 @@
+name: Monitor Sanctions List
 
+on:
+  schedule:
+    - cron: "0 0,6,12,18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-sanctions:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run sanctions monitor
+        run: python scripts/monitor.py
+
+      - name: Commit changes
+        run: |
+          git config user.name "Sanctions Monitor Bot"
+          git config user.email "bot@sanctions-monitor.local"
+          git add data/
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+            git commit -m "Update sanctions data - $TIMESTAMP"
+            git push
+          fi
